@@ -192,6 +192,11 @@ type Provider struct {
 	// it as the client sent it, rather than given magpie's search (#359).
 	Searches bool `json:"searches,omitempty"`
 
+	// MaskClient is the optional client fingerprint for a custom provider's
+	// selected BaseAPI: codex for Responses, claude-code for Anthropic.
+	// Empty keeps the usual request behavior. It travels with providers.json.
+	MaskClient string `json:"maskClient,omitempty"`
+
 	// PinUpstream, on the Cline API, has its DeepSeek models answered only
 	// by DeepSeek's own API (White Immortal on Discord): Cline routes a
 	// model through an AI gateway that may serve it from any host, and
@@ -1048,6 +1053,10 @@ func normalize(p Provider) Provider {
 	}
 	if !slices.Contains(Affinities, p.Affinity) {
 		p.Affinity = ""
+	}
+	p.MaskClient = strings.ToLower(strings.TrimSpace(p.MaskClient))
+	if p.MaskProtocol() == "" {
+		p.MaskClient = ""
 	}
 	if p.MaxConcurrency != nil && *p.MaxConcurrency < 0 {
 		p.MaxConcurrency = new(int)

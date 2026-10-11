@@ -423,6 +423,15 @@ func probe(ctx context.Context, p Provider, proto Protocol, url string, body []b
 	}
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
+	// Use the same fingerprint as forwarded requests, after the existing
+	// test logic has chosen the model's API. Explicit Test-as keeps its own.
+	masked := testClient(ctx) == "" && p.MaskProtocol() == proto
+	if masked {
+		body = MaskBody(p.MaskClient, p.Key, proto, body)
+		if proto == Anthropic && !strings.Contains(url, "?") {
+			url += "?beta=true"
+		}
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		r.Error = err.Error()
@@ -443,6 +452,8 @@ func probe(ctx context.Context, p Provider, proto Protocol, url string, body []b
 	}
 	if client := testClient(ctx); client != "" {
 		clientHeaders(client, req.Header)
+	} else if masked {
+		MaskHeaders(p.MaskClient, req.Header)
 	}
 	if err := p.Sign(ctx, req, proto, body); err != nil {
 		r.Error = err.Error()

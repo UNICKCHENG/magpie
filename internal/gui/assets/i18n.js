@@ -4333,6 +4333,11 @@ const I18N = {
     "{agent}'s Chat features must be enabled (chat.disableAIFeatures=false) and its product.json must include defaultChatAgent and trustedExtensionAuthAccess for GitHub.copilot-chat. Then run Developer: Reload Window in {agent}.": "{agent} 需开启 Chat 功能（chat.disableAIFeatures=false），且它的 product.json 需为 GitHub.copilot-chat 包含 defaultChatAgent 和 trustedExtensionAuthAccess。然后在 {agent} 中运行 Developer: Reload Window。",
     "{agent}'s GitHub Copilot Chat {version} has neither a Custom Endpoint nor an OpenAI Compatible provider, so it can't list magpie's models.": "{agent} 的 GitHub Copilot Chat {version} 既没有 Custom Endpoint 也没有 OpenAI Compatible 供应商，因此无法列出 magpie 的模型。",
     "~/.dsh/settings.yaml sets its own DeepSeek endpoint or key, which dsh puts over magpie's; clear it in dsh's Models page to go through magpie.": "~/.dsh/settings.yaml 设置了自己的 DeepSeek 地址或 Key，dsh 会优先用它而不是 magpie 的；请在 dsh 的 Models 页面清除它，才能走 magpie。",
+    "Client": "客户端",
+    "Codex CLI fingerprint": "Codex CLI 指纹",
+    "Claude Code fingerprint": "Claude Code 指纹",
+    "For a relay that serves only Codex's own clients, off by default.": "适用于只服务 Codex 官方客户端的中转站，默认不开启。",
+    "For a relay that serves only Claude Code, off by default.": "适用于只服务 Claude Code 的中转站，默认不开启。",
   },
   "zh-TW": {
     "account": "帳號",
@@ -8647,6 +8652,11 @@ const I18N = {
     "{agent}'s Chat features must be enabled (chat.disableAIFeatures=false) and its product.json must include defaultChatAgent and trustedExtensionAuthAccess for GitHub.copilot-chat. Then run Developer: Reload Window in {agent}.": "{agent} 需開啟 Chat 功能（chat.disableAIFeatures=false），且它的 product.json 需為 GitHub.copilot-chat 包含 defaultChatAgent 和 trustedExtensionAuthAccess。然後在 {agent} 中執行 Developer: Reload Window。",
     "{agent}'s GitHub Copilot Chat {version} has neither a Custom Endpoint nor an OpenAI Compatible provider, so it can't list magpie's models.": "{agent} 的 GitHub Copilot Chat {version} 既沒有 Custom Endpoint 也沒有 OpenAI Compatible 供應商，因此無法列出 magpie 的模型。",
     "~/.dsh/settings.yaml sets its own DeepSeek endpoint or key, which dsh puts over magpie's; clear it in dsh's Models page to go through magpie.": "~/.dsh/settings.yaml 設定了自己的 DeepSeek 位址或 Key，dsh 會優先用它而不是 magpie 的；請在 dsh 的 Models 頁面清除它，才能走 magpie。",
+    "Client": "用戶端",
+    "Codex CLI fingerprint": "Codex CLI 指紋",
+    "Claude Code fingerprint": "Claude Code 指紋",
+    "For a relay that serves only Codex's own clients, off by default.": "適用於只服務 Codex 官方用戶端的中轉站，預設不開啟。",
+    "For a relay that serves only Claude Code, off by default.": "適用於只服務 Claude Code 的中轉站，預設不開啟。",
   },
   ja: {
     "account": "アカウント",
@@ -12963,6 +12973,11 @@ const I18N = {
     "{agent}'s Chat features must be enabled (chat.disableAIFeatures=false) and its product.json must include defaultChatAgent and trustedExtensionAuthAccess for GitHub.copilot-chat. Then run Developer: Reload Window in {agent}.": "{agent} の Chat 機能が有効（chat.disableAIFeatures=false）で、product.json に GitHub.copilot-chat 用の defaultChatAgent と trustedExtensionAuthAccess が含まれている必要があります。そのあと {agent} で Developer: Reload Window を実行してください。",
     "{agent}'s GitHub Copilot Chat {version} has neither a Custom Endpoint nor an OpenAI Compatible provider, so it can't list magpie's models.": "{agent} の GitHub Copilot Chat {version} には Custom Endpoint も OpenAI Compatible プロバイダもないため、magpie のモデルを一覧に出せません。",
     "~/.dsh/settings.yaml sets its own DeepSeek endpoint or key, which dsh puts over magpie's; clear it in dsh's Models page to go through magpie.": "~/.dsh/settings.yaml に独自の DeepSeek エンドポイントやキーがあり、dsh は magpie のものよりそちらを優先します。magpie を経由するには dsh の Models ページで消してください。",
+    "Client": "クライアント",
+    "Codex CLI fingerprint": "Codex CLI 指紋",
+    "Claude Code fingerprint": "Claude Code 指紋",
+    "For a relay that serves only Codex's own clients, off by default.": "Codex 公式クライアントのみに応じる中継サイト向け。既定ではオフです。",
+    "For a relay that serves only Claude Code, off by default.": "Claude Code のみに応じる中継サイト向け。既定ではオフです。",
   },
   de: {
     "account": "Konto",
@@ -17279,6 +17294,11 @@ const I18N = {
     "{agent}'s Chat features must be enabled (chat.disableAIFeatures=false) and its product.json must include defaultChatAgent and trustedExtensionAuthAccess for GitHub.copilot-chat. Then run Developer: Reload Window in {agent}.": "Die Chat-Funktionen von {agent} müssen aktiviert sein (chat.disableAIFeatures=false), und seine product.json muss defaultChatAgent und trustedExtensionAuthAccess für GitHub.copilot-chat enthalten. Danach in {agent} Developer: Reload Window ausführen.",
     "{agent}'s GitHub Copilot Chat {version} has neither a Custom Endpoint nor an OpenAI Compatible provider, so it can't list magpie's models.": "GitHub Copilot Chat {version} in {agent} hat weder einen Custom Endpoint noch einen OpenAI-Compatible-Anbieter und kann magpies Modelle daher nicht auflisten.",
     "~/.dsh/settings.yaml sets its own DeepSeek endpoint or key, which dsh puts over magpie's; clear it in dsh's Models page to go through magpie.": "~/.dsh/settings.yaml setzt einen eigenen DeepSeek-Endpunkt oder Schlüssel, den dsh über den von magpie stellt; ihn auf der Models-Seite von dsh leeren, um über magpie zu gehen.",
+    "Client": "Client",
+    "Codex CLI fingerprint": "Codex-CLI-Fingerprint",
+    "Claude Code fingerprint": "Claude-Code-Fingerprint",
+    "For a relay that serves only Codex's own clients, off by default.": "Für ein Relay, das nur Codex' eigene Clients bedient, standardmäßig aus.",
+    "For a relay that serves only Claude Code, off by default.": "Für ein Relay, das nur Claude Code bedient, standardmäßig aus.",
   },
 };
 

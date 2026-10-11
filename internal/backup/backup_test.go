@@ -400,3 +400,44 @@ func TestProfileKeys(t *testing.T) {
 		t.Fatalf("%v", got)
 	}
 }
+
+// The fingerprint is part of the provider, including a backup without keys.
+func TestClientFingerprintRoundTrip(t *testing.T) {
+	for _, keys := range []bool{false, true} {
+		home(t)
+		for _, p := range []provider.Provider{
+			{ID: "responses", Name: "Responses", Responses: "https://relay.example/v1", BaseAPI: "responses", MaskClient: provider.ClientCodex, Key: "k"},
+			{ID: "anthropic", Name: "Anthropic", Anthropic: "https://relay.example", BaseAPI: "anthropic", MaskClient: provider.ClientClaudeCode, Key: "k"},
+			{ID: "off", Name: "Off", Responses: "https://relay.example/v1", BaseAPI: "responses", Key: "k"},
+		} {
+			if err := provider.Save(p); err != nil {
+				t.Fatal(err)
+			}
+		}
+		b, err := Collect(keys, "test")
+		if err != nil {
+			t.Fatal(err)
+		}
+		data, err := Seal(b, "passphrase")
+		if err != nil {
+			t.Fatal(err)
+		}
+		home(t)
+		b, err = Open(data, "passphrase")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err = Restore(b, Parts{Providers: true}); err != nil {
+			t.Fatal(err)
+		}
+		for id, want := range map[string]string{"responses": provider.ClientCodex, "anthropic": provider.ClientClaudeCode, "off": ""} {
+			p, err := provider.Find(id)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if p.MaskClient != want {
+				t.Fatalf("keys=%v, %s: mask %q, want %q", keys, id, p.MaskClient, want)
+			}
+		}
+	}
+}
