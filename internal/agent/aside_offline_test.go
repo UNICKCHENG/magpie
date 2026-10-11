@@ -31,6 +31,10 @@ func TestAsideInitialReadOffersStageWithoutWrites(t *testing.T) {
 }
 
 func TestAsideOfflineDisconnectRestoresWithoutDaemon(t *testing.T) {
+	// This fixture has no desktop app either, regardless of the host.
+	was := appFolders
+	appFolders = func() []string { return nil }
+	t.Cleanup(func() { appFolders = was })
 	settings, models := asideHome(t)
 	before := readFile(settings)
 	a := mustFindAside(t)

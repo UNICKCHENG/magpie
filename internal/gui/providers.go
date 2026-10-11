@@ -78,6 +78,9 @@ type providerJSON struct {
 	ExtraBody provider.ExtraBody `json:"extraBody,omitempty"`
 	// the API the user gave a custom provider's Base URL as (BaseAPI)
 	BaseAPI string `json:"baseAPI,omitempty"`
+	// the coding client its requests wear (provider.MaskClient), over the
+	// API the Base URL names
+	MaskClient string `json:"maskClient,omitempty"`
 	// the vendor searches the web by itself (provider.Searches)
 	Searches bool `json:"searches"`
 	// on the Cline API: its DeepSeek models are served by DeepSeek's own
@@ -496,7 +499,7 @@ func agentUses(agents []*agent.Agent, findGroup func(string) (provider.Group, []
 func providerInfo(p provider.Provider, agents []agentUse) providerJSON {
 	out := providerJSON{
 		ID: p.ID, Name: p.Name, Icon: p.Icon, Preset: p.Preset, Host: p.Host(),
-		Chat: p.Chat, Responses: p.Responses, Anthropic: p.Anthropic, Gemini: p.Gemini, Decide: p.Decide, BaseAPI: p.BaseAPI, ModelTest: p.ModelTest(), TestsAs: p.TestClients(), DecideTest: p.AsksDecideModels(),
+		Chat: p.Chat, Responses: p.Responses, Anthropic: p.Anthropic, Gemini: p.Gemini, Decide: p.Decide, BaseAPI: p.BaseAPI, MaskClient: p.MaskClient, ModelTest: p.ModelTest(), TestsAs: p.TestClients(), DecideTest: p.AsksDecideModels(),
 		Catalog: p.Catalog, Website: p.Website, KeysURL: p.KeysURL,
 		Proxy: p.Proxy, AccountProxies: p.AccountProxies, AccountModels: p.AccountModels, AccountCaps: p.AccountCaps, AccountWindowCaps: p.AccountWindowCaps, AccountNames: p.AccountNames, Headers: p.Headers, ExtraBody: p.ExtraBody, Searches: p.Searches, Cline: p.ClinePinnable(), PinUpstream: p.PinUpstream, Unredacted: p.Unredacted, BalanceURL: p.BalanceURL, BalancePath: p.BalancePath, ModelsURL: p.ModelsURL,
 		Ready: p.Ready(), Chosen: p.Picks(), Models: []modelJSON{}, Agents: []providerAgent{},
@@ -981,6 +984,10 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 			// Proxy is the proxy its requests go through (#237), "" to
 			// follow the global one; a save that leaves it out keeps it
 			Proxy *string `json:"proxy"`
+			// MaskClient is the coding client its requests wear
+			// (maskclient.go), "" for none; a save that leaves it out
+			// keeps it
+			MaskClient *string `json:"maskClient"`
 			// MaxConcurrency is how many requests each of its keys or
 			// accounts has out at once: a number (0 none), null for what
 			// its plugin says or none; a save that leaves it out keeps it
@@ -1101,6 +1108,11 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 		}
 		if req.Sink != nil {
 			in.Sink = *req.Sink
+		}
+		// MaskClient comes as its own field ("" for none) so a save that
+		// leaves it out can keep what was saved
+		if req.MaskClient != nil {
+			in.MaskClient = *req.MaskClient
 		}
 		var moved []agent.Move
 		switch r.PathValue("action") {
@@ -1382,6 +1394,12 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 				if in.BaseAPI == "" && old != nil {
 					in.BaseAPI = old.BaseAPI
 				}
+				// the client its requests wear (maskClient), likewise: the
+				// editor always says, "" for none, a save that doesn't say
+				// keeps it
+				if req.MaskClient == nil && old != nil {
+					in.MaskClient = old.MaskClient
+				}
 				if in.Icon == "" && old != nil && in.Preset == "" {
 					in.Icon = old.Icon
 				}
@@ -1564,7 +1582,7 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 			}
 			saved := *p
 			if req.Typed {
-				q := typed(*p, in, req.Proxy)
+				q := typed(*p, in, req.Proxy, req.MaskClient)
 				p = &q
 			}
 			if len(req.Test) > 0 {
@@ -1601,7 +1619,7 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 				}
 				p = *saved
 			}
-			p = typed(p, in, req.Proxy)
+			p = typed(p, in, req.Proxy, req.MaskClient)
 			if strings.TrimSpace(in.Decide) != "" {
 				// a decision API is asked its smallest question, at
 				// POST …/systemone (#647)
@@ -1677,7 +1695,7 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 			if p.Name == "" {
 				p.Name = cmp.Or(strings.TrimSpace(in.Name), "the vendor")
 			}
-			p = typed(p, in, req.Proxy)
+			p = typed(p, in, req.Proxy, req.MaskClient)
 			ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 			defer cancel()
 			ms, err := p.List(ctx)
@@ -1709,7 +1727,7 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 			defer cancel()
 			ask := *p
 			if req.Typed {
-				ask = typed(*p, in, req.Proxy)
+				ask = typed(*p, in, req.Proxy, req.MaskClient)
 			}
 			ms, dropped, err := ask.Refetch(ctx)
 			if err != nil {
@@ -2021,9 +2039,14 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 // Vertex AI provider's project, location, credentials file and service
 // account are the ones typed, spelled as a Save keeps them, unless no
 // project is.
-func typed(p, in provider.Provider, proxy *string) provider.Provider {
+func typed(p, in provider.Provider, proxy, maskClient *string) provider.Provider {
 	if k := strings.TrimSpace(in.Key); k != "" && k != p.Key {
 		p.Key, p.KeyName, p.KeyProtocol, p.KeyWeight = k, "", "", 0
+	}
+	if maskClient != nil {
+		// the form's client mask, "" for none, over the saved one's
+		p.MaskClient = *maskClient
+		p.BaseAPI = in.BaseAPI
 	}
 	if v := in.Vertex.Normal(); v != nil && p.IsVertex() && v.Project != "" {
 		p.Vertex = v

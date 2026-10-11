@@ -7620,6 +7620,9 @@ function asTyped() {
   const body = { typed: true, key: keys.length > 1 ? keys[0] : (draft.key || "").trim(), chat: (draft.chat || "").trim(), responses: (draft.responses || "").trim(), anthropic: (draft.anthropic || "").trim(), gemini: (draft.gemini || "").trim(), modelsURL: (draft.modelsURL || "").trim() };
   // a System One base is asked at POST …/systemone, not on the three APIs
   if (draft.api === "decide") body.decide = (draft.decide || "").trim();
+  // Test uses the client selected in the form, before Save too.
+  body.baseAPI = draft.api === "openai" ? "chat" : draft.api;
+  body.maskClient = draft.mask ? maskForAPI(draft.api) : "";
   // a Vertex AI provider is asked at the project typed, with the
   // credentials typed, as a pasted key is
   if (draft.vertex) body.vertex = vertexOfDraft();
@@ -8356,9 +8359,15 @@ function baseAPIOf(p) {
   return p.chat ? "openai" : p.anthropic ? "anthropic" : p.responses ? "responses" : p.gemini ? "gemini" : p.decide ? "decide" : "openai";
 }
 
+// maskForAPI is the optional fingerprint for the custom Base URL API.
+function maskForAPI(api) {
+  return api === "responses" ? "codex" : api === "anthropic" ? "claude-code" : "";
+}
+
 // draftOf is a saved provider as its editor's form holds it.
 function draftOf(p) {
-  return { id: p.id, name: p.name, preset: p.preset, chat: p.chat, responses: p.responses, anthropic: p.anthropic, gemini: p.gemini || "", catalog: p.catalog, decide: p.decide || "", key: "", api: baseAPIOf(p), chosen: pickedOf(p), extra: [], headers: headerRows(p.headers), extraBody: extraBodyText(p.extraBody), icon: p.icon || "", fallback: [...(p.fallback || [])], unlisted: !!p.unlisted, searches: !!p.searches, unredacted: !!p.unredacted, pinUpstream: !!p.pinUpstream, balanceURL: p.balanceURL || "", balancePath: p.balancePath || "", modelsURL: p.modelsURL || "", contexts: contextsText(p.contexts), outputs: contextsText(p.outputs), compacts: contextsText(p.compacts), keysUrl: p.keysUrl || "", ...proxyDraft(p), ...concurrencyDraft(p) };
+  const api = baseAPIOf(p);
+  return { id: p.id, name: p.name, preset: p.preset, chat: p.chat, responses: p.responses, anthropic: p.anthropic, gemini: p.gemini || "", catalog: p.catalog, decide: p.decide || "", key: "", api, mask: !!p.maskClient && p.maskClient === maskForAPI(api), chosen: pickedOf(p), extra: [], headers: headerRows(p.headers), extraBody: extraBodyText(p.extraBody), icon: p.icon || "", fallback: [...(p.fallback || [])], unlisted: !!p.unlisted, searches: !!p.searches, unredacted: !!p.unredacted, pinUpstream: !!p.pinUpstream, balanceURL: p.balanceURL || "", balancePath: p.balancePath || "", modelsURL: p.modelsURL || "", contexts: contextsText(p.contexts), outputs: contextsText(p.outputs), compacts: contextsText(p.compacts), keysUrl: p.keysUrl || "", ...proxyDraft(p), ...concurrencyDraft(p) };
 }
 
 // duplicateProvider opens the Add form on a copy of p (#268): its URLs,
@@ -8402,7 +8411,7 @@ function drawEditor(p, presetID) {
     ? draftOf(p)
     : pr
       ? { id: pr.id, name: pr.name, preset: pr.id, key: "", chosen: [], extra: [], headers: [] }
-      : { id: "", name: "", preset: "", chat: "", responses: "", anthropic: "", decide: "", catalog: "", key: "", api: "openai", chosen: [], extra: [], headers: [], icon: "" });
+      : { id: "", name: "", preset: "", chat: "", responses: "", anthropic: "", decide: "", catalog: "", key: "", api: "openai", mask: false, chosen: [], extra: [], headers: [], icon: "" });
   const ed = el("div", "editor" + (isNew ? " new" : ""));
   ed.onclick = (e) => e.stopPropagation();
 
@@ -8506,6 +8515,9 @@ function drawEditor(p, presetID) {
   // the Redaction row, shown while every address is on this computer or
   // the local network
   let showLocal = () => {};
+  // the client-masquerade row, shown while the Base URL's API is one a
+  // coding client speaks natively (maskClient)
+  let showMask = () => {};
   if (custom) {
     name = input(draft.name, t("e.g. My Relay"));
     name.oninput = () => { draft.name = name.value; if (isNew) draft.id = slug(name.value); };
@@ -8551,6 +8563,7 @@ function drawEditor(p, presetID) {
       fillEndpoints();
       showSearch();
       showLocal();
+      showMask();
     };
     queueMicrotask(() => slide(seg, "api"));
     url = input(draft[apiField[draft.api]], urlHint(draft.api), "url");
@@ -8578,6 +8591,27 @@ function drawEditor(p, presetID) {
     // Detect asks OpenAI's, Anthropic's and Gemini's APIs (#1346)
     urlWrap.append(detectAPIs(p, () => url.value, useDetected));
     ed.append(...field("Base URL", urlWrap));
+
+    // Only Responses and Anthropic offer a client fingerprint, off by default.
+    {
+      const [tk, cb] = tick("", !!draft.mask);
+      cb.classList.add("mask-client");
+      cb.onchange = () => { draft.mask = cb.checked; };
+      const maskHint = (v) => t(v === "codex"
+        ? "For a relay that serves only Codex's own clients, off by default."
+        : "For a relay that serves only Claude Code, off by default.");
+      const row = field(t("Client"), tk, maskHint(maskForAPI(draft.api)));
+      const label = tk.querySelector("span"), help = row[1].querySelector(".hint");
+      showMask = () => {
+        const v = maskForAPI(draft.api);
+        for (const e of row) e.style.display = v ? "" : "none";
+        if (!v) { draft.mask = false; cb.checked = false; return; }
+        label.textContent = t(v === "codex" ? "Codex CLI fingerprint" : "Claude Code fingerprint");
+        help.textContent = maskHint(v);
+      };
+      showMask();
+      ed.append(...row);
+    }
   }
 
   // the Cline API serves a model from whichever host its AI gateway picks;
@@ -9117,6 +9151,9 @@ function drawEditor(p, presetID) {
         return editorError(t("Base URL: type the {api} URL, or pick the API the URL you have is for", { api: t(API_NAMES[draft.api]) }), "warn");
       }
       body.baseAPI = draft.api === "openai" ? "chat" : draft.api;
+      // the client the provider wears follows the Base URL's API, and a
+      // protocol neither client supports wears none
+      body.maskClient = draft.mask ? maskForAPI(draft.api) : "";
     }
     if (custom) { body.icon = draft.icon || "generic"; body.balanceURL = (draft.balanceURL || "").trim(); body.balancePath = (draft.balancePath || "").trim(); body.modelsURL = (draft.modelsURL || "").trim(); }
     if (p) { body.fallback = draft.fallback; body.unlisted = draft.unlisted; body.modelPrefs = modelPrefsOfDraft(); Object.assign(body, routingOfDraft(p)); }
