@@ -9,15 +9,13 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"regexp"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/yetone/magpie/internal/catalog"
 	"github.com/yetone/magpie/internal/codexcat"
-	"github.com/yetone/magpie/internal/proc"
+	"github.com/yetone/magpie/internal/fingerprint"
 )
 
 // A ChatGPT account's requests are made the way Codex CLI makes them, as
@@ -39,7 +37,7 @@ func codexSign(token func(context.Context) (tok, accountID string, err error)) f
 			req.Header.Set("chatgpt-account-id", accountID)
 		}
 		req.Header.Set("OpenAI-Beta", "responses=experimental")
-		req.Header.Set("originator", "codex_cli_rs")
+		req.Header.Set("originator", fingerprint.Builtin(fingerprint.Codex, "").Header("Originator"))
 		// the version and the User-Agent name one Codex, never older than
 		// the client whose request this is (its version header, relayed)
 		ver := newerVersion(codexVersion(), req.Header.Get("version"))
@@ -75,63 +73,8 @@ func sessionHeaders(h http.Header, body []byte) {
 	}
 }
 
-var codexUA struct {
-	sync.Once
-	os string
-}
-
-// codexUserAgent is the User-Agent Codex CLI of version v sends:
-// "codex_cli_rs/0.155.1 (Mac OS 26.6.0; arm64) Apple_Terminal/455".
-func codexUserAgent(v string) string {
-	codexUA.Do(func() { codexUA.os = codexOS() })
-	arch := map[string]string{"arm64": "arm64", "amd64": "x86_64"}[runtime.GOARCH]
-	if arch == "" {
-		arch = runtime.GOARCH
-	}
-	term := map[string]string{"darwin": "Apple_Terminal/455", "windows": "WindowsTerminal"}[runtime.GOOS]
-	if term == "" {
-		term = "xterm-256color"
-	}
-	return "codex_cli_rs/" + v + " (" + codexUA.os + "; " + arch + ") " + term
-}
-
-var versionRE = regexp.MustCompile(`\d+(\.\d+)+`)
-
-// codexOS names the system as Codex CLI does: "Mac OS 26.6.0",
-// "Windows 10.0.26100", "Linux 6.8.0".
-func codexOS() string {
-	run := func(name string, args ...string) string {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		out, _ := proc.CommandContext(ctx, name, args...).Output()
-		return versionRE.FindString(string(out))
-	}
-	three := func(v string) string {
-		for strings.Count(v, ".") < 2 {
-			v += ".0"
-		}
-		return v
-	}
-	switch runtime.GOOS {
-	case "darwin":
-		if v := run("sw_vers", "-productVersion"); v != "" {
-			return "Mac OS " + three(v)
-		}
-		return "Mac OS"
-	case "windows":
-		if v := run("cmd", "/c", "ver"); v != "" { // "Microsoft Windows [Version 10.0.26100.4652]"
-			if parts := strings.Split(v, "."); len(parts) > 3 {
-				v = strings.Join(parts[:3], ".")
-			}
-			return "Windows " + v
-		}
-		return "Windows"
-	}
-	if v := run("uname", "-r"); v != "" {
-		return "Linux " + three(v)
-	}
-	return "Linux"
-}
+// codexUserAgent uses the shared built-in identity for subscription requests.
+func codexUserAgent(v string) string { return fingerprint.CodexUserAgent(v) }
 
 // codexPromptsPath is where the instructions of the account's models are
 // kept, next to its model list, for every magpie process to find.

@@ -30,6 +30,7 @@ import (
 
 	"github.com/yetone/magpie/internal/awake"
 
+	"github.com/yetone/magpie/internal/fingerprint"
 	"github.com/yetone/magpie/internal/plugin"
 	"github.com/yetone/magpie/internal/provider"
 	"github.com/yetone/magpie/internal/redact"
@@ -468,6 +469,11 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	// and keeps the community's plugins up to date, noting others' updates, and the Bun they run on
 	go plugin.KeepUpdated(ctx)
 	go plugin.KeepBunUpdated(ctx)
+	// Wait for sampling processes and temporary files before this owner exits.
+	fingerprintCtx, stopFingerprint := context.WithCancel(ctx)
+	fingerprintDone := make(chan struct{})
+	go func() { defer close(fingerprintDone); fingerprint.Keep(fingerprintCtx) }()
+	defer func() { stopFingerprint(); <-fingerprintDone }()
 	// and, when settings say to, keeps the computer awake while agents work
 	go awake.Keep(ctx, func() awake.Level {
 		switch set := settings.Load(); {
@@ -3116,9 +3122,11 @@ func (s *Server) forwardOnce(ctx context.Context, p provider.Provider, to provid
 	// the client a masked provider wears (provider.MaskClient): its body
 	// shaped as it sends one, whatever agent the request came from
 	maskSession := ""
+	var mask fingerprint.Snapshot
 	if p.MaskProtocol() == to {
 		maskSession = conversationID(in, body)
-		body = provider.MaskBody(p.MaskClient, p.Key, to, body)
+		mask = provider.ClientFingerprint(p.MaskClient)
+		body = mask.ApplyBody(p.Key, string(to), body)
 	}
 	body = deepseekToolPatterns(p, to, body)
 	body = toolOneOfAsAnyOf(p, to, body)
@@ -3211,11 +3219,11 @@ func (s *Server) forwardOnce(ctx context.Context, p provider.Provider, to provid
 		// fromClaudeCode above, its own headers the best mask); from any
 		// other it goes in the client's own identity
 		if p.MaskClient == provider.ClientCodex && !fromCodex(in) {
-			provider.MaskHeaders(provider.ClientCodex, req.Header)
+			mask.ApplyHeaders(req.Header)
 			provider.MaskSessionHeaders(provider.ClientCodex, maskSession, req.Header)
 		}
 		if p.MaskClient == provider.ClientClaudeCode && !fromClaudeCode(in) {
-			provider.MaskHeaders(provider.ClientClaudeCode, req.Header)
+			mask.ApplyHeaders(req.Header)
 			provider.MaskSessionHeaders(provider.ClientClaudeCode, maskSession, req.Header)
 			// the mask's betas are fitted as any others are (betas.go): one
 			// the provider has turned away by name is left out, so the retry

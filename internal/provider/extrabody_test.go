@@ -8,7 +8,80 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/tidwall/gjson"
 )
+
+// Test and Detect apply extra fields after the client fingerprint, as the
+// gateway does: ordinary fields fill gaps and !fields replace defaults.
+func TestExtraBodyWithClientFingerprint(t *testing.T) {
+	for _, tc := range []struct {
+		name, client, extra, field, want string
+		proto                            Protocol
+	}{
+		{"codex default", ClientCodex, `{"include":["other"]}`, "include.0", "reasoning.encrypted_content", Responses},
+		{"codex forced", ClientCodex, `{"!store":true}`, "store", "true", Responses},
+		{"claude default", ClientClaudeCode, `{"metadata":{"user_id":"custom"}}`, "metadata.user_id", "device_id", Anthropic},
+		{"claude forced", ClientClaudeCode, `{"!metadata":{"user_id":"custom"}}`, "metadata.user_id", "custom", Anthropic},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			detectHome(t)
+			up := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method == http.MethodGet {
+					io.WriteString(w, `{"data":[{"id":"m"}]}`)
+					return
+				}
+				body, _ := io.ReadAll(r.Body)
+				got := gjson.GetBytes(body, tc.field).String()
+				if got != tc.want && !(tc.want == "device_id" && strings.Contains(got, `"device_id"`)) {
+					http.Error(w, "extra body precedence: "+tc.field+" = "+got+", want "+tc.want, http.StatusBadRequest)
+					return
+				}
+				if !strings.HasPrefix(gjson.GetBytes(body, "prompt_cache_key").String(), "magpie-test-") {
+					http.Error(w, "missing test session", http.StatusBadRequest)
+					return
+				}
+				io.WriteString(w, `{"status":"completed","output":[]}`)
+			}))
+			t.Cleanup(up.Close)
+			p := Provider{ID: "relay", Key: "sk-relay", BaseAPI: string(tc.proto), MaskClient: tc.client, Models: []string{"m"}}
+			if tc.proto == Responses {
+				p.Responses = up.URL + "/v1"
+			} else {
+				p.Anthropic = up.URL
+			}
+			if err := json.Unmarshal([]byte(tc.extra), &p.ExtraBody); err != nil {
+				t.Fatal(err)
+			}
+			p.ExtraBody["prompt_cache_key"] = json.RawMessage(`"${sessionId}"`)
+			ctx := context.Background()
+			for name, run := range map[string]func() []Result{
+				"Test":       func() []Result { return p.Test(ctx) },
+				"TestModels": func() []Result { return p.TestModels(ctx, []string{"m"}) },
+			} {
+				if rs := run(); len(rs) != 1 || !rs[0].OK {
+					t.Errorf("%s: %+v", name, rs)
+				}
+			}
+			ds, err := p.Detect(ctx, up.URL, "m")
+			if err != nil {
+				t.Fatal(err)
+			}
+			found := false
+			for _, d := range ds {
+				if d.Protocol == tc.proto {
+					found = true
+					if !d.OK {
+						t.Errorf("Detect: %+v", d)
+					}
+				}
+			}
+			if !found {
+				t.Fatal("Detect skipped the masked protocol")
+			}
+		})
+	}
+}
 
 // The editor's Test and Detect ask with the extra fields too, so a relay
 // that turns a request away without a prompt_cache_key (#1604) answers

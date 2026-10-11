@@ -70,11 +70,11 @@ cleanup() {
 }
 trap cleanup INT TERM
 
-# what the build reads: Go, and the one Markdown file embedded
+# what the build reads: Go and the bundled fingerprint definitions
 relevant() {
 	case $1 in
 	*/site/* | *_test.go) return 1 ;;
-	*.go | */internal/agent/codex_prompt.md) return 0 ;;
+	*.go | */internal/fingerprint/defaults.json | */internal/fingerprint/codex_prompt.md) return 0 ;;
 	esac
 	return 1
 }

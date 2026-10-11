@@ -21,14 +21,10 @@ import (
 
 	"github.com/yetone/magpie/internal/catalog"
 	"github.com/yetone/magpie/internal/codexcat"
+	"github.com/yetone/magpie/internal/fingerprint"
 	"github.com/yetone/magpie/internal/proc"
 	"github.com/yetone/magpie/internal/settings"
 )
-
-// codexClientVersion is the Codex CLI version the models list is asked for
-// when Codex CLI has not asked itself yet: the list leaves out models newer
-// than the client asking.
-const codexClientVersion = "0.159.0"
 
 // codexModels asks the ChatGPT backend which Codex models the account's own
 // plan has — a Free account lists fewer than a Plus or Pro one, and one it
@@ -69,7 +65,7 @@ var codexVersionCache struct {
 
 // codexVersion is the client version the models list is asked for: the
 // newest of the Codex CLI installed, the one Codex CLI last asked with and
-// codexClientVersion. The list leaves out models newer than the client
+// the bundled fingerprint version. The list leaves out models newer than the client
 // asking, and Codex CLI's models_cache.json keeps the version it was written
 // with until Codex next asks — after an update that brought new models
 // (0.155 GPT-6 Luna and Sol), asking with it would leave them out.
@@ -77,7 +73,7 @@ func codexVersion() string {
 	codexVersionCache.Lock()
 	defer codexVersionCache.Unlock()
 	if time.Since(codexVersionCache.at) >= 10*time.Minute {
-		v := codexClientVersion
+		v := fingerprint.DefaultVersion(fingerprint.Codex)
 		newer := func(c string) {
 			if c = claudeSemverRE.FindString(c); c != "" && compareClaudeVersion(c, v) > 0 {
 				v = c
