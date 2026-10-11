@@ -8,15 +8,7 @@ name: Release
 # still read magpie-releases only.
 
 on:
-  push:
-    tags:
-      - 'v*'
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Version to release (e.g., 0.1.0 — no v prefix; the v tag must exist)'
-        required: true
-        type: string
 
 jobs:
   trigger-release:
