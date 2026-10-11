@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/yetone/magpie/internal/catalog"
+	"github.com/yetone/magpie/internal/fingerprint"
 )
 
 // Result is what a probe of one endpoint came back with.
@@ -51,7 +52,7 @@ func (p Provider) Test(ctx context.Context) []Result {
 			return []Result{{Protocol: proto, Model: model, Error: "no key is on for this endpoint"}}
 		}
 		url, body := tiny(q, proto, UpstreamName(p, model))
-		return []Result{probe(ctx, q, proto, url, q.tested(asClient(client, proto, body)), model, testWait)}
+		return []Result{probeModel(ctx, q, proto, url, asClient(client, proto, body), model, testWait)}
 	}
 	if p.isClaudeAccount() {
 		return []Result{p.testClaude(ctx, p.testModel(p, Anthropic))}
@@ -68,7 +69,7 @@ func (p Provider) Test(ctx context.Context) []Result {
 			continue
 		}
 		url, body := tiny(q, proto, UpstreamName(p, model))
-		out = append(out, probe(ctx, q, proto, url, q.tested(body), model, testWait))
+		out = append(out, probeModel(ctx, q, proto, url, body, model, testWait))
 	}
 	if p.IsRemoteMagpie() {
 		// The model list already checked its key and named its decisions.
@@ -312,7 +313,7 @@ func (p Provider) testOne(ctx context.Context, model string) Result {
 		r := probe(ctx, q, proto, url, []byte(body), model, drawWait)
 		if !r.OK && (r.Status == 404 || r.Status == 405) {
 			url, body := tiny(q, proto, model)
-			if c := probe(ctx, q, proto, url, q.tested(body), model, testWait); c.OK {
+			if c := probeModel(ctx, q, proto, url, body, model, testWait); c.OK {
 				return c
 			}
 		}
@@ -322,7 +323,7 @@ func (p Provider) testOne(ctx context.Context, model string) Result {
 	if client != "" {
 		body = asClient(client, proto, body)
 	}
-	return probe(ctx, q, proto, url, q.tested(body), model, testWait)
+	return probeModel(ctx, q, proto, url, body, model, testWait)
 }
 
 // keyFor is p using the first key on that works with proto: one made for
@@ -415,7 +416,28 @@ func AuthHeaders(p Provider, proto Protocol) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + p.Key}
 }
 
+// probeModel prepares a model test in gateway order: client identity, then
+// extra body fields. One snapshot supplies both the body and headers.
+func probeModel(ctx context.Context, p Provider, proto Protocol, url, body, model string, wait time.Duration) Result {
+	// Use the same fingerprint as forwarded requests, after the existing
+	// test logic has chosen the model's API. Explicit Test-as keeps its own.
+	var mask *fingerprint.Snapshot
+	if testClient(ctx) == "" && p.MaskProtocol() == proto {
+		snapshot := ClientFingerprint(p.MaskClient)
+		mask = &snapshot
+		body = string(mask.ApplyBody(p.Key, string(proto), []byte(body)))
+		if proto == Anthropic && !strings.Contains(url, "?") {
+			url += "?beta=true"
+		}
+	}
+	return probeRequest(ctx, p, proto, url, p.tested(body), model, wait, mask)
+}
+
 func probe(ctx context.Context, p Provider, proto Protocol, url string, body []byte, model string, wait time.Duration) Result {
+	return probeRequest(ctx, p, proto, url, body, model, wait, nil)
+}
+
+func probeRequest(ctx context.Context, p Provider, proto Protocol, url string, body []byte, model string, wait time.Duration, mask *fingerprint.Snapshot) Result {
 	r := Result{Protocol: proto, Model: model}
 	if model == "" {
 		r.Error = "no model to try: expose one, or refresh the model list"
@@ -423,15 +445,6 @@ func probe(ctx context.Context, p Provider, proto Protocol, url string, body []b
 	}
 	ctx, cancel := context.WithTimeout(ctx, wait)
 	defer cancel()
-	// Use the same fingerprint as forwarded requests, after the existing
-	// test logic has chosen the model's API. Explicit Test-as keeps its own.
-	masked := testClient(ctx) == "" && p.MaskProtocol() == proto
-	if masked {
-		body = MaskBody(p.MaskClient, p.Key, proto, body)
-		if proto == Anthropic && !strings.Contains(url, "?") {
-			url += "?beta=true"
-		}
-	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		r.Error = err.Error()
@@ -452,8 +465,8 @@ func probe(ctx context.Context, p Provider, proto Protocol, url string, body []b
 	}
 	if client := testClient(ctx); client != "" {
 		clientHeaders(client, req.Header)
-	} else if masked {
-		MaskHeaders(p.MaskClient, req.Header)
+	} else if mask != nil {
+		mask.ApplyHeaders(req.Header)
 	}
 	if err := p.Sign(ctx, req, proto, body); err != nil {
 		r.Error = err.Error()

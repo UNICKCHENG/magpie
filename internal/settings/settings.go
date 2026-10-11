@@ -210,6 +210,9 @@ type Settings struct {
 	// one of UpdateEveries, 0 for every six hours.
 	NoAutoUpdate bool `json:"noAutoUpdate,omitempty"`
 	UpdateEvery  int  `json:"updateEvery,omitempty"`
+	// FingerprintUpdates enables daily isolated client captures by default.
+	// Keep false in JSON so an explicit opt-out survives the next load.
+	FingerprintUpdates bool `json:"fingerprintUpdates"`
 	// UpdateMirror is a GitHub download mirror an update's file is fetched
 	// through, its prefix put before the release's github.com URL
 	// (https://mirror.example/https://github.com/…): "" for none, which is
@@ -779,6 +782,7 @@ func (s Settings) Compact() int {
 // Windows box that shows it).
 func (s *Settings) KeepOwn(cur Settings) {
 	s.GatewayConversations = cur.GatewayConversations
+	s.FingerprintUpdates = cur.FingerprintUpdates
 	s.UIFont, s.CodeFont = cur.UIFont, cur.CodeFont
 	s.Window, s.Proxy, s.Port, s.Dock, s.DockWindow, s.Lightweight = cur.Window, cur.Proxy, cur.Port, cur.Dock, cur.DockWindow, cur.Lightweight
 	s.WindowMaximised, s.KeepAwake, s.KeepAwakeDisplay = cur.WindowMaximised, cur.KeepAwake, cur.KeepAwakeDisplay
@@ -850,7 +854,7 @@ func Load() Settings {
 
 // load is called with fileMu held for reading or writing.
 func load() Settings {
-	var s Settings
+	s := Settings{FingerprintUpdates: true}
 	// read again only once the file changed: a look at the agents asks for
 	// the settings for every model of every agent (hundreds of reads, a
 	// fifth of the Agents page's wait)
@@ -859,7 +863,7 @@ func load() Settings {
 		if err := json.Unmarshal(bytes.TrimPrefix(b, []byte("\xef\xbb\xbf")), &s); err != nil {
 			// one left all zero by a crash (#1505) is its last good generation
 			if bak, err := lastgood.Fallback(Path(), b, validSettings); err == nil {
-				s = Settings{}
+				s = Settings{FingerprintUpdates: true}
 				_ = json.Unmarshal(bytes.TrimPrefix(bak, []byte("\xef\xbb\xbf")), &s)
 			}
 		}

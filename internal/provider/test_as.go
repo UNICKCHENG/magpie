@@ -3,6 +3,7 @@ package provider
 import (
 	"context"
 	"encoding/json"
+	"github.com/yetone/magpie/internal/fingerprint"
 	"maps"
 	"net/http"
 	"os"
@@ -32,8 +33,8 @@ import (
 
 // The clients a test can be asked as.
 const (
-	ClientCodex      = "codex"
-	ClientClaudeCode = "claude-code"
+	ClientCodex      = fingerprint.Codex
+	ClientClaudeCode = fingerprint.Claude
 )
 
 type testClientKey struct{}
@@ -187,7 +188,7 @@ func clientHeaders(client string, h http.Header) {
 	shape := clientShape(client)
 	if shape == nil && client == ClientCodex {
 		v := codexVersion()
-		shape = http.Header{"User-Agent": {codexUserAgent(v)}, "Originator": {"codex_cli_rs"}, "Version": {v}}
+		shape = http.Header{"User-Agent": {codexUserAgent(v)}, "Originator": {fingerprint.Builtin(fingerprint.Codex, "").Header("Originator")}, "Version": {v}}
 	}
 	for k, vs := range shape {
 		h[k] = vs

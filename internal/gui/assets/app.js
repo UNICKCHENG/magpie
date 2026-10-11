@@ -20014,6 +20014,11 @@ function renderSettings() {
     segs(UPDATE_EVERY.map((m) => [m, m < 60 ? t("{n} min", { n: m }) : t("{n} h", { n: m / 60 })]), s.updateEvery || 360,
       (updateEvery) => savePrefs({ ...keep, updateEvery }))).classList.add("update-every-row", ...(s.noAutoUpdate ? ["off"] : []));
   renderUpdateMirror(row(t("Download source"), "", ""), s);
+  row(t("Fingerprint updates"), t("Updates Claude Code and Codex CLI fingerprints. On by default. Checks on first use or enable, then every 24 hours; downloads clients only when needed."), "",
+    segs([["off", t("Off")], ["on", t("On")]], s.fingerprintUpdates ? "on" : "off",
+      (v) => savePrefs({ ...keep, fingerprintUpdates: v === "on" }))).classList.add("fingerprint-update-row");
+  row(t("Fingerprint status"), "", "").classList.add("fingerprint-status-row");
+  renderFingerprintStatus(s.fingerprintUpdate);
   const open = el("button", "text", t("Open"));
   open.onclick = () => api("settings/reveal", {}).catch((e) => status(e.message, "err"));
   // portable (a data folder beside magpie, #508): everything is in there
@@ -20041,6 +20046,36 @@ function renderSettings() {
   // the parts' tabs, one gone whose rows are all hidden here
   setSetTab(setTab);
 }
+
+// Refresh only the status text: polling must not replace unsaved preferences.
+function renderFingerprintStatus(update = {}) {
+  const row = $(".fingerprint-status-row");
+  if (!row) return;
+  const who = row.querySelector(".who");
+  let sub = who.querySelector(".sub");
+  if (!sub) { sub = el("div", "sub"); who.append(sub); }
+  const messages = [t("Turning this off cancels only the update; saved fingerprints remain in use.")];
+  if (update.running) messages.push(prefs?.fingerprintUpdates ? t("Downloading and checking client fingerprints…") : t("Stopping the fingerprint update…"));
+  else if (update.error) messages.push(t("Update failed; keeping the previous fingerprints: {error}", { error: update.error }));
+  else if (!update.updated) messages.push(t("Using built-in fingerprints"));
+  if (update.checked) messages.push(t("Last checked: {time}", { time: new Date(update.checked).toLocaleString() }));
+  if (prefs?.fingerprintUpdates && update.next && !update.running) messages.push(t("Next check: {time}", { time: new Date(update.next).toLocaleString() }));
+  sub.textContent = messages.join(" · ");
+  row.querySelector(".val").textContent = Object.entries(update.versions || {}).map(([client, version]) =>
+    `${client === "codex" ? "Codex CLI" : "Claude Code"} ${version}`).join(" · ");
+}
+let fingerprintPoll = false;
+setInterval(async () => {
+  if (fingerprintPoll || document.hidden || view !== "settings" || setShown !== "about" || !(prefs?.fingerprintUpdates || prefs?.fingerprintUpdate?.running) || prefsQueued) return;
+  fingerprintPoll = true;
+  try {
+    const s = await api("settings");
+    if (view === "settings" && setShown === "about" && prefs && !prefsQueued) {
+      prefs.fingerprintUpdate = s.fingerprintUpdate;
+      renderFingerprintStatus(s.fingerprintUpdate);
+    }
+  } catch {} finally { fingerprintPoll = false; }
+}, 5000);
 
 // Gateway mode's switch, in magpie web alone (gatewaymode.go): Automatic
 // (on with --gateway or no agents here), On or Off. Turned, the tabs follow
@@ -22078,7 +22113,7 @@ function prefsKeep(s) {
     claudeWarmup: s.claudeWarmup || "", codexWarmAt: s.codexWarmAt || "", claudeWarmAt: s.claudeWarmAt || "",
     codexWarmAts: warmTimes(s.codexWarmAts, s.codexWarmAt), claudeWarmAts: warmTimes(s.claudeWarmAts, s.claudeWarmAt), workbuddyCheckin: !!s.workbuddyCheckin, traeCheckin: !!s.traeCheckin, minimaxCheckin: !!s.minimaxCheckin, qoderCheckin: !!s.qoderCheckin, noStats: !!s.noStats, noUsageStats: !!s.noUsageStats,
     memberModel: !!s.memberModel, noLoopGuard: !!s.noLoopGuard,
-    noUpdatePill: !!s.noUpdatePill, noAutoUpdate: !!s.noAutoUpdate, updateEvery: s.updateEvery || 360,
+    fingerprintUpdates: !!s.fingerprintUpdates, noUpdatePill: !!s.noUpdatePill, noAutoUpdate: !!s.noAutoUpdate, updateEvery: s.updateEvery || 360,
     trayUsage: s.trayUsage || "", trayUsageEvery: s.trayUsageEvery || 3, trayNoLogos: !!s.trayNoLogos, trayNoBird: !!s.trayNoBird, vision: s.vision || "", imageGen: s.imageGen || "", searcher: s.searcher || "", searchFirst: s.searchFirst || "", currency: s.currency || "usd",
     chineseUnits: !!s.chineseUnits, usageAlert: s.usageAlert || 0, balanceAlert: s.balanceAlert || 0, resetReminder: s.resetReminder || 0,
     turnDoneAlert: s.turnDoneAlert || 0 };

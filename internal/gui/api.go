@@ -34,6 +34,7 @@ import (
 	"github.com/yetone/magpie/internal/autostart"
 	"github.com/yetone/magpie/internal/catalog"
 	"github.com/yetone/magpie/internal/filememo"
+	"github.com/yetone/magpie/internal/fingerprint"
 	"github.com/yetone/magpie/internal/fonts"
 	"github.com/yetone/magpie/internal/fx"
 	"github.com/yetone/magpie/internal/gateway"
@@ -326,6 +327,7 @@ func currentFX() fxJSON {
 
 // settingsJSON is the Settings page: the two choices plus the facts it shows.
 type settingsJSON struct {
+	FingerprintUpdate fingerprint.Status `json:"fingerprintUpdate"`
 	settings.Settings
 	Version string `json:"version"`
 	Dir     string `json:"dir"`     // where magpie keeps its files, as shown
@@ -509,6 +511,7 @@ func searchState(s *settingsJSON) {
 
 func settingsState() settingsJSON {
 	s := settingsJSON{Settings: settings.Load(), Version: Version, Dir: tilde(settings.Dir()), Portable: settings.Portable() != "", Gateway: gateway.URL()}
+	s.FingerprintUpdate = fingerprint.UpdateStatus()
 	s.AddrEnv = os.Getenv("MAGPIE_ADDR")
 	if s.LAN || gateway.OnNetwork() {
 		s.PublicURL = gateway.PublicURL()
@@ -1035,6 +1038,9 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
 		cur := settings.Load()
 		var fields map[string]json.RawMessage
 		_ = json.Unmarshal(body, &fields)
+		if _, sent := fields["fingerprintUpdates"]; !sent {
+			in.FingerprintUpdates = cur.FingerprintUpdates
+		}
 		// Older pages do not send fonts. An explicit null restores the
 		// default, while an omitted field (or a browser save) preserves it.
 		if _, sent := fields["uiFont"]; !sent || isWeb(w) {
@@ -1125,6 +1131,9 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
 		if err := settings.Save(in); err != nil {
 			fail(rw, err)
 			return
+		}
+		if in.FingerprintUpdates != cur.FingerprintUpdates {
+			fingerprint.Changed()
 		}
 		if onFonts != nil && (!sameFont(in.UIFont, cur.UIFont) || !sameFont(in.CodeFont, cur.CodeFont)) {
 			onFonts()

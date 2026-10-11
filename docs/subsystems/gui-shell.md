@@ -186,3 +186,9 @@ BROWSER=webkit node --test internal/gui/tests/click-scroll.test.cjs
 webkit`). Set `NODE_PATH` when Playwright is installed outside the repo. The
 Test workflow in CI does not run this suite, so a GUI change must run it
 locally and report the result. See [`tests/README.md`](../../internal/gui/tests/README.md).
+
+Settings → About also owns the default-on Fingerprint updates switch and
+status. It uses the existing settings GET/POST API; the background work and
+stored profiles are described in [Providers and accounts](providers-accounts.md#updating-client-fingerprints).
+Turning it off cancels only fingerprint sampling/download work, not model
+requests. The status poll updates text without replacing preference controls.

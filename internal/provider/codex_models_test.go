@@ -2,6 +2,7 @@ package provider
 
 import (
 	"context"
+	"github.com/yetone/magpie/internal/fingerprint"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -72,7 +73,7 @@ func TestCodexVersion(t *testing.T) {
 	// Codex CLI's state under CODEX_HOME, when that is set
 	t.Setenv("CODEX_HOME", t.TempDir())
 	codexVersionCache.at = time.Time{}
-	if got := codexVersion(); got != codexClientVersion {
+	if got := codexVersion(); got != fingerprint.DefaultVersion(fingerprint.Codex) {
 		t.Errorf("CODEX_HOME with no cache: %s", got)
 	}
 	writeFile(t, filepath.Join(os.Getenv("CODEX_HOME"), "models_cache.json"), map[string]any{"client_version": "0.160.2"})
@@ -95,7 +96,7 @@ func TestCodexVersionSeen(t *testing.T) {
 	codexSeen = seenVersion{}
 	codexVersionCache.at = time.Time{}
 	t.Cleanup(func() { codexExecutable = old; codexVersionCache.at = time.Time{}; codexSeen = seenVersion{} })
-	if got := codexVersion(); got != codexClientVersion {
+	if got := codexVersion(); got != fingerprint.DefaultVersion(fingerprint.Codex) {
 		t.Fatalf("nothing seen: %s", got)
 	}
 	h := func(kv ...string) http.Header {
@@ -109,8 +110,8 @@ func TestCodexVersionSeen(t *testing.T) {
 		h    http.Header
 		want string
 	}{
-		{h("User-Agent", "claude-cli/2.1.300 (external, cli)"), codexClientVersion},
-		{h("User-Agent", "Mozilla/5.0", "version", "9.9.9"), codexClientVersion},
+		{h("User-Agent", "claude-cli/2.1.300 (external, cli)"), fingerprint.DefaultVersion(fingerprint.Codex)},
+		{h("User-Agent", "Mozilla/5.0", "version", "9.9.9"), fingerprint.DefaultVersion(fingerprint.Codex)},
 		{h("User-Agent", "codex_cli_rs/0.160.0 (Mac OS 26.6.0; arm64) ghostty/1.2.0"), "0.160.0"},
 		{h("User-Agent", "Codex Desktop/0.162.3 (Windows 10.0.26100; x86_64) unknown", "originator", "Codex Desktop"), "0.162.3"},
 		{h("User-Agent", "codex_cli_rs/0.150.0", "version", "0.150.0"), "0.162.3"},
@@ -198,7 +199,7 @@ func TestCodexVersionNotRerun(t *testing.T) {
 	codexExecutable = func() string { return exe }
 	for range 3 { // ten minutes apart
 		codexVersionCache.at = time.Time{}
-		if got := codexVersion(); got != codexClientVersion {
+		if got := codexVersion(); got != fingerprint.DefaultVersion(fingerprint.Codex) {
 			t.Fatalf("got %s", got)
 		}
 	}

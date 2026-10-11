@@ -7,7 +7,6 @@ import (
 	"bytes"
 	"cmp"
 	"crypto/sha256"
-	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"maps"
@@ -21,15 +20,14 @@ import (
 	"github.com/yetone/magpie/internal/appdir"
 	"github.com/yetone/magpie/internal/catalog"
 	"github.com/yetone/magpie/internal/edit"
+	"github.com/yetone/magpie/internal/fingerprint"
 	"github.com/yetone/magpie/internal/settings"
 )
 
 // Prompt is Codex's generic system prompt (Apache-2.0, openai/codex,
 // core/gpt-5.2-codex_prompt.md). Third-party models need one because the
 // bundled catalog only carries prompts for OpenAI models.
-//
-//go:embed codex_prompt.md
-var Prompt string
+var Prompt = fingerprint.CodexInstructions
 
 // DefaultEffort picks the middle of the road: "medium" or "high" when
 // offered, else whatever the list starts with.
