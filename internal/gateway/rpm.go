@@ -259,17 +259,25 @@ func (s *Server) paidFor(ctx context.Context, p provider.Provider, who string) c
 type rpmTransport struct{ next http.RoundTripper }
 
 func (t rpmTransport) RoundTrip(r *http.Request) (*http.Response, error) {
-	if tk, ok := r.Context().Value(rpmKey{}).(*rpmTicket); ok && !tk.paid.CompareAndSwap(true, false) {
-		if _, err := tk.l.wait(r.Context(), tk.who, tk.limit, tk.longest); err != nil {
-			if r.Body != nil {
-				r.Body.Close()
-			}
-			var e *errRPM
-			if errors.As(err, &e) {
-				return nil, fmt.Errorf("%s: %w", tk.who, err)
-			}
-			return nil, err
+	if err := payRPM(r.Context()); err != nil {
+		if r.Body != nil {
+			r.Body.Close()
 		}
+		return nil, err
 	}
 	return t.next.RoundTrip(r)
+}
+
+// payRPM admits HTTP and native model calls through the same ticket.
+func payRPM(ctx context.Context) error {
+	if tk, ok := ctx.Value(rpmKey{}).(*rpmTicket); ok && !tk.paid.CompareAndSwap(true, false) {
+		if _, err := tk.l.wait(ctx, tk.who, tk.limit, tk.longest); err != nil {
+			var e *errRPM
+			if errors.As(err, &e) {
+				return fmt.Errorf("%s: %w", tk.who, err)
+			}
+			return err
+		}
+	}
+	return nil
 }

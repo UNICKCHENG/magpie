@@ -87,6 +87,9 @@ func (p Provider) TestsAs(client string) string {
 		}
 		return "it has no Responses or Chat Completions endpoint, where Codex's requests go"
 	}
+	if p.MaskClient == client && p.MaskProtocol() != "" {
+		return ""
+	}
 	if client == ClientClaudeCode {
 		h := HostOf(p.Base(Anthropic))
 		if strings.HasSuffix(h, "anthropic.com") || strings.HasSuffix(h, "googleapis.com") || p.IsBedrock() || p.IsAzure() {

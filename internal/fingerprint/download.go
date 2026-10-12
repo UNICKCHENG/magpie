@@ -66,8 +66,10 @@ func downloadAndCapture(ctx context.Context, client, dir string, old Profile) (P
 		return Profile{}, errors.New("release has no stable client version")
 	}
 	// Only a previously captured, validated version can skip the large download.
-	if old.Version == version && validate(client, old) == nil {
-		return old, nil
+	if old.Version == version && validate(client, old) == nil && old.Binary != nil {
+		if path, err := binaryPath(client, *old.Binary); err == nil && checkBinary(path, *old.Binary) == nil {
+			return old, nil
+		}
 	}
 	path := filepath.Join(dir, client)
 	if err := download(ctx, url, checksum, size, path); err != nil {
@@ -88,7 +90,15 @@ func downloadAndCapture(ctx context.Context, client, dir string, old Profile) (P
 		}
 		path += ".exe"
 	}
-	return capture(ctx, client, version, path, dir)
+	p, err := capture(ctx, client, version, path)
+	if err != nil {
+		return Profile{}, err
+	}
+	p.Binary, err = storeBinary(client, version, path)
+	if err == nil {
+		p.Previous = old.Binary
+	}
+	return p, err
 }
 
 func codexAsset(goos, arch string) (string, error) {

@@ -19,7 +19,7 @@ keys and accounts per request is in [Gateway routing and fallback](gateway-routi
 | --- | --- | --- |
 | Provider | `Provider` holds the endpoint bases for each `Protocol` (Chat, Responses, Anthropic, Gemini), the keys, `Fallback`, `Routing`, `Sink`, `Affinity`, concurrency and queue limits, `Headers`, `Proxy`, models, and balance settings. `BaseAPI` is the API a custom provider's editor shows its Base URL as: the one the user picked and saved, while it has a URL, so a provider with a chat URL beside its Responses one isn't shown as OpenAI compatible after Responses was picked. Requests go by which URLs are set. A custom provider's `Gemini` URL is the base of Google's Gemini API, or of one that answers as it does (#1346): `GeminiBase` keeps it as the base (…/v1beta added to a bare host, a pasted endpoint or model list cut back), requests go to `models/{model}:streamGenerateContent?alt=sse` under it (`GeminiPath`) signed with `x-goog-api-key` (`AuthHeaders`), and its models are listed by `catalog.FetchGemini` (paged, only those serving generateContent). Factory's sign-in alone keeps its own `/generate` route and token (`FactoryGemini`). `Account` is set only for a subscription and is never saved (`json:"-"`). | [`provider.go`](../../internal/provider/provider.go) |
 | Extra body | `ExtraBody` (`extraBody` in providers.json, the editor's *Extra body*, #1604) is a JSON object whose fields `WithExtraBody` adds at the top level of every JSON body sent to the provider: Messages, Chat, Responses and Gemini, relayed as they came or translated, in the gateway's `forwardOnce` and in Test and Detect (`tested`). A field the body has already is kept; a name written `"!name"` replaces it. Values are put in as written, objects whole, not merged. `${sessionId}` in any string, at any depth, becomes the request's session: the agent's session header (`sessionOf`), else the id `conversationID` derives from the first user message (`magpie-` and its hash), so it stays the same through one conversation; Test and Detect send `magpie-test-` and 12 random letters, a new one each time. `model`, `stream` and the conversation (`messages`, `input`, `contents`, `system`, `systemInstruction`, `system_instruction`, `instructions`, `tools`, `ExtraBodyReserved`) are magpie's: Save refuses them with or without `!` (`ExtraBodyOK`), the editor says so as they are typed, and one written into providers.json by hand is dropped on read (`cleanExtraBody`). Not sent with it: `count_tokens`, embeddings, images, video and System One's decision model (other APIs), and a signed-in account's requests. One object goes to every API; fields for one API alone are not a thing yet. | [`extrabody.go`](../../internal/provider/extrabody.go), [`gateway.go`](../../internal/gateway/gateway.go) |
-| Client fingerprint | A custom provider may opt into `MaskClient`: `codex` when its selected `BaseAPI` is Responses, or `claude-code` when it is Anthropic. The editor offers neither on Chat or other APIs, and starts unchecked. Empty preserves existing behavior. `MaskProtocol` limits the fingerprint to that custom provider's selected API; it never changes routing or model API selection. `forwardOnce` adds the client's headers, session identifiers and body markers after routing; existing client headers and user-supplied provider headers keep their precedence. The Claude Code body identity is also added when a caller supplies its own system prompt: the existing text blocks, order and cache controls are kept, and a native CLI or Agent SDK identity is not duplicated. Default test requests use the same fingerprint after choosing the model's API. In forwarding, Test and Detect, extra body fields are applied after the fingerprint: ordinary names keep existing fields, and `!name` replaces them. The option is stored on `Provider`, so the existing backup export/import preserves it with or without keys; the optional learned profiles are machine-local (see below). | [`maskclient.go`](../../internal/provider/maskclient.go), [`provider.go`](../../internal/provider/provider.go), [`gateway.go`](../../internal/gateway/gateway.go), [`test.go`](../../internal/provider/test.go), [`backup.go`](../../internal/backup/backup.go) |
+| Client fingerprint | A custom provider may opt into `MaskClient`: private Codex CLI for Responses, or private Claude Code for Anthropic. `MaskProtocol` keeps the existing provider/API scope; model routing is unchanged. Inference and model probes use `DoNative`; model lists and balances keep HTTP. Anthropic token counting uses the local estimator. Extra body fields are applied before the CLI adapter, without generated fingerprint headers or body markers. Unsupported Codex parameters fail explicitly; they are never silently dropped or sent through an HTTP fallback. Backup/import preserves the option. Private builds, warmup and session reuse are described below. | [`maskclient.go`](../../internal/provider/maskclient.go), [`native.go`](../../internal/gateway/native.go), [`nativeclient`](../../internal/nativeclient/client.go), [`test.go`](../../internal/provider/test.go) |
 | providers.json | `Path` is `providers.json` in magpie's config folder. A read that fails returns `ErrUnreadable` and is never treated as empty. `store` writes atomically through a rename and drops the cached catalog (`catalog.Touched`). | [`provider.go`](../../internal/provider/provider.go) |
 | The list | `All` merges stored providers with `Accounts()`. An entry with no URL stores the user's picks for an account. The order is `file.Order`. Reads within one request share one build (`Hold`, #746). | [`provider.go`](../../internal/provider/provider.go) |
 | Model picks | `Models` are the models the user picked for agents; none means the vendor's list, up to 24 (`Exposed`). `Save` keeps beside new picks the models listed then (`PickedFrom`, `listedWith`), and the same picks saved again keep it. When the picks held every model listed then, one the vendor lists since is served first beside them (`withNewlyListed`, `Picks`); one listed then and left unpicked stays out. Picks saved before `PickedFrom` was kept are taken to hold every model when they hold every one released up to the newest of them (models.dev's `release_date`), so a Claude account whose user picked them all is served Haiku 5.5 (wakaka). The editor and the TUI start from `Picks`, so a later Save keeps the new model. | [`models.go`](../../internal/provider/models.go), [`provider.go`](../../internal/provider/provider.go) |
@@ -174,58 +174,111 @@ Vertex AI's tests send Vertex AI, Google's token endpoint and IAM Credentials
 to a server of their own (`VertexForTest`). Check a change
 against real accounts in a sandbox HOME, as [Code standards](../code-standards.md#acceptance-criteria) describes.
 
-## Updating client fingerprints
+## Private native client fingerprints
 
-Settings → About → Fingerprint updates (`settings.FingerprintUpdates`) is on
-by default, independent of magpie's own updates. An absent setting means on;
-an explicit false is saved and kept across restarts. First use or enabling starts a check; the
-gateway owner runs `fingerprint.Keep` and checks again every 24 hours from the
-last attempt. The attempt time survives restarts. A separate GUI process's
-changes are noticed within a minute. Settings sync preserves this machine's
-choice (`KeepOwn`); older settings clients that omit the field preserve it too.
+`MaskProtocol` gates custom-provider inference in `forwardOnce` and model tests
+in `probeModel`. It excludes subscriptions, presets and nonmatching APIs.
+`DoNative` shares connection/proxy setup between those entry points. Native
+startup runs before the existing RPM ticket is spent (`payRPM`). Lists and
+balances remain ordinary API requests; Anthropic `count_tokens` uses the local
+estimator. Explicit Test-as on a native-enabled provider needs no previously
+observed CLI headers.
 
-The bundled source of truth is
-[`defaults.json`](../../internal/fingerprint/defaults.json): versions, header
-templates, identity text, recognized native identities and body defaults.
-The unchanged Codex prompt is kept beside it, shared by the model catalog.
-`fingerprint.Resolve` selects a verified learned profile or the bundled fallback
-and returns one snapshot for the request's body and headers; an update between
-those steps cannot mix two versions. Provider code decides when masking applies
-and supplies Codex's observed version, but keeps no separate mask constants.
-The subscription path explicitly uses the same bundled definitions without
-opting subscriptions into automatic captured profiles. The runtime JSON file is
-generated state, not a second hand-maintained definition.
+[`nativeclient`](../../internal/nativeclient/client.go) adapts Codex app-server
+stdio and Claude Code stream-json to Responses and Anthropic responses. The
+native executable generates its HTTP identity. The host does not manufacture
+client headers, session headers, billing text or device IDs. User provider
+headers remain explicit configuration; requested Claude betas use its native `ANTHROPIC_BETAS` environment setting.
+Native errors preserve their upstream HTTP status. Native Anthropic requests
+share the gateway's bounded beta/shape compatibility retries. They do not take
+account header-repair retries or silently fall back to HTTP inference.
+Codex built-in tools are disabled; function calls return to the API caller.
+Claude also has tools disabled and at most one native model turn per request.
 
-[`internal/fingerprint`](../../internal/fingerprint/update.go) asks official
-release metadata for Codex and Claude Code. A version already captured and
-validated needs no binary download or CLI run. A new version is downloaded
-into a temporary folder, checked against the release's SHA-256 and size, and
-run once with an empty home/config, synthetic credentials and a loopback mock
-model endpoint. No real model request is needed. The whole update is bounded
-to ten minutes and each CLI run to one minute. At most one update is active;
-cancellation ends the process tree, waits for it, closes the local listener,
-and removes the temporary files. This is a sampling run, not a gateway Agent
-session. No SDK, system-installed CLI or user configuration is upgraded.
+Responses shorthand messages are expanded into explicit native response items.
+Unsupported Codex parameters, including `max_output_tokens`, `store=true`,
+`parallel_tool_calls=false` and `text.format.type=json_object`, return 400 with
+an explanation before inference. This is a compatibility limit, not support
+for the complete Responses API. The internal Codex probe omits its own 16-token
+limit and reads only the first streamed answer; user-specified ExtraBody is
+still validated. Claude caller system text is passed through the native
+`initialize.systemPrompt` control. Text blocks are joined in order with
+blank lines. The CLI generates its own billing and identity blocks, while the
+caller prompt replaces the default task instructions. The CLI manages system
+caching. With no caller system text, the CLI uses its default prompt.
+Caller system `cache_control` is not applied to that native prompt. Nontext
+system blocks and unknown block fields return 400 instead of losing input.
+Caller history, tools and their cache controls use the CLI's native extra-body
+setting; that setting never overrides `system`.
 
-The captured allowlist contains version, client identity headers and Claude
-Code's short identity text. It excludes credentials, device/session IDs,
-billing markers, tools and conversation content. Both validated profiles are
-installed atomically in `fingerprints/<os>-<arch>.json` in the settings folder.
-Failed validation, download, or capture leaves the previous pair in place.
-The existing session-ID generation and caller cache controls are not changed
-by the update. Turning the switch off cancels the update only and keeps using
-the last valid profiles; without one, the built-in profile is used.
+### Startup and bounded reuse
 
-The existing settings API returns `fingerprintUpdate`: running state, last
-check, next check, last successful refresh, versions and the latest error.
-Versions start with the bundled defaults, even with updates off, and each
-successfully captured profile overrides its default. A pending or failed
-update keeps the previous versions visible. About polls only that status while
-open and enabled, or until a cancelled
-update has finished cleaning up. Verification:
-`go test -race ./internal/fingerprint`, provider
-`TestMaskUsesLearnedFingerprintWithoutCopyingSessions`, GUI
-`TestFingerprintUpdatesSettings`, and browser `fingerprint-updates.test.cjs`.
-`MAGPIE_TEST_FINGERPRINT_LIVE=1 go test ./internal/fingerprint -run
-TestOfficialClientsCapture -v` opts into official downloads and a real local
-capture with synthetic keys. It does not test a supplier's acceptance policy.
+The gateway starts `provider.KeepNative` asynchronously. It reads only stored,
+enabled custom providers and warms each selected build by initializing then
+exiting the CLI. It sends no model turn, uses synthetic credentials and an
+isolated temporary home, and does not keep a warm process resident. Every
+minute it notices enabled providers and newly selected builds. A successful
+build is warmed once per gateway run. Failure is logged and does not block
+gateway startup; later inference still reports its own concrete error.
+Disabling fingerprint *updates* does not disable this warmup or inference.
+
+[`Pool`](../../internal/nativeclient/pool.go) belongs to one gateway and is
+closed when that gateway stops. At most four native requests execute at once;
+up to two additional idle processes remain for 30 seconds. A process retires
+after eight requests. These are process-count limits, not a fixed RSS promise.
+Active requests retain the gateway's existing concurrency, cancellation and
+rate-limit rules; the native slot wait adds another bounded execution lane.
+
+Reuse requires an explicit session header and client User-Agent. `nativeScope`
+includes the full session ID, caller gateway key, provider, client headers and
+subagent identity. The pool additionally includes the upstream API key, URL,
+model, executable path, explicit headers, betas and resolved proxy environment.
+Claude reuse also requires the same complete caller system value, because its
+system prompt is fixed at initialization. Changing that value uses a different
+process; unchanged prompts can reuse a reset process. This extra match does
+not replace the explicit key/client/session isolation. Missing session/client identity
+uses a one-shot process; shared API credentials with identical client/session
+identifiers cannot identify distinct applications. Clients requiring separate
+identity should use separate gateway keys or session IDs.
+
+Only completed, reset runs can return to the pool. Codex starts a fresh
+nonpersistent thread per request, drains completion and unsubscribes. A turn
+returning function calls is not reused. Claude drains its result, rewinds the
+user turn, checks the rewind acknowledgement and clears extra-body settings.
+Cancellation, protocol failure, failed reset or shutdown destroys the process
+tree and its temporary home. Per-request admission callbacks are cleared before
+reuse. An old idle timer cannot expire a process that has since been borrowed.
+
+### Build ownership and updates
+
+[`runtime.go`](../../internal/fingerprint/runtime.go) stores immutable copies in
+`fingerprints/native/<os>-<arch>/<client>/<version>-<sha>/cli`. Size and SHA-256
+are checked before use. The executable pin lives until its process exits,
+including time spent idle. New acquisitions select the updated build; old runs
+finish on their pinned build. Pruning retains selected, previous, imported and
+in-use builds. An installed standalone CLI can seed this store; its original
+installation, subscriptions and user configuration are never changed.
+
+Settings → About → Fingerprint updates controls `fingerprint.Keep`, independent
+of application updates. It checks official metadata every 24 hours, downloads
+and verifies each new release, then tests the **same native adapter** against a
+loopback model endpoint with synthetic credentials. Version and nonsecret
+identity evidence are saved atomically only after both client checks succeed.
+Failure retains the previous pair. Cancellation reaps validation processes and
+removes temporary files. The updater never upgrades the user's CLI or a
+subscription's executable. Captured identity is validation evidence only.
+
+The settings status uses the same binary selection as inference, including an
+imported build. Reading it never starts or imports a CLI. Bundled versions are
+shown before a private build exists. The bundled `Builtin`, `CodexUserAgent`,
+`DefaultVersion` and shared Codex prompt remain for existing subscription and
+explicit Test-as consumers; automatic native updates do not alter those paths.
+The old custom-provider body/header/session simulation has been removed.
+
+Verification uses isolated HOME and pinned Go caches (see code standards):
+`go test -race -tags nogui ./internal/nativeclient ./internal/fingerprint
+./internal/provider ./internal/gateway`. Set `MAGPIE_TEST_NATIVE_BIN_DIR` to a
+directory containing native `codex` and `claude` executables for local real-CLI
+checks of forwarding, probes, errors, tools, resets and isolation. Official
+release downloads are separately opt-in through `MAGPIE_TEST_FINGERPRINT_LIVE`.
+Neither loopback test establishes a supplier's acceptance policy or latency.

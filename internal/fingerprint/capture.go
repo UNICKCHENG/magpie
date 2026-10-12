@@ -11,27 +11,18 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
 	"os/exec"
-	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/klauspost/compress/zstd"
+	"github.com/yetone/magpie/internal/nativeclient"
 	"github.com/yetone/magpie/internal/proc"
 )
 
-func capture(parent context.Context, client, version, exe, dir string) (Profile, error) {
+func capture(parent context.Context, client, version, exe string) (Profile, error) {
 	ctx, cancel := context.WithTimeout(parent, time.Minute)
 	defer cancel()
-	home, err := os.MkdirTemp(dir, "home-")
-	if err != nil {
-		return Profile{}, err
-	}
-	for _, p := range []string{".codex", ".claude", "config", "cache", "tmp"} {
-		if err := os.Mkdir(filepath.Join(home, p), 0700); err != nil {
-			return Profile{}, err
-		}
-	}
 	l, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return Profile{}, err
@@ -73,20 +64,20 @@ func capture(parent context.Context, client, version, exe, dir string) (Profile,
 	go func() { defer close(closed); _ = srv.Serve(l) }()
 	defer func() { _ = srv.Close(); <-closed }()
 	base := "http://" + l.Addr().String() + prefix
-	args := []string{"--no-daemon", "exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check", "--sandbox", "read-only", "-m", "gpt-5.6", "-c", `model_provider="capture"`, "-c",
-		`model_providers.capture={name="Capture",base_url="` + base + `/v1",wire_api="responses",env_key="CAPTURE_API_KEY",request_max_retries=0,stream_max_retries=0}`, "Reply only OK. Do not use tools."}
+	body := `{"model":"gpt-5.6","input":"Reply only OK.","stream":false}`
+	endpoint := base + "/v1"
 	if client == Claude {
-		args = []string{"-p", "Reply only OK. Do not use tools.", "--model", "claude-haiku-5-5", "--tools", "", "--setting-sources", "", "--strict-mcp-config", "--mcp-config", `{"mcpServers":{}}`, "--no-session-persistence", "--append-system-prompt", "Fingerprint capture: preserve this business instruction."}
+		body = `{"model":"claude-haiku-5-5","messages":[{"role":"user","content":"Reply only OK."}],"max_tokens":32,"stream":false}`
+		endpoint = base
 	}
-	cmd := proc.Command(exe, args...)
-	cmd.Dir, cmd.Env = home, captureEnv(home, base)
-	// The full request and CLI output are never written to magpie's state/logs.
-	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-	if err := runClient(ctx, cmd); err != nil {
-		if ctx.Err() != nil {
-			return Profile{}, ctx.Err()
-		}
-		return Profile{}, errors.New("isolated CLI capture failed")
+	res, err := nativeclient.Do(ctx, nativeclient.Options{Client: client, Executable: exe, Base: endpoint, Key: "synthetic-fingerprint-capture", Proxy: "direct"}, []byte(body))
+	if err != nil {
+		return Profile{}, fmt.Errorf("native protocol validation: %w", err)
+	}
+	result, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	res.Body.Close()
+	if err != nil || res.StatusCode != http.StatusOK || !strings.Contains(string(result), `"OK"`) {
+		return Profile{}, errors.New("native protocol validation did not complete a model response")
 	}
 	select {
 	case p := <-profiles:
@@ -114,25 +105,6 @@ func runClient(ctx context.Context, cmd *exec.Cmd) error {
 		<-killed
 	}
 	return err
-}
-
-func captureEnv(home, base string) []string {
-	var env []string
-	for _, k := range []string{"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "SystemDrive"} {
-		if v := os.Getenv(k); v != "" {
-			env = append(env, k+"="+v)
-		}
-	}
-	for k, v := range map[string]string{
-		"HOME": home, "USERPROFILE": home, "XDG_CONFIG_HOME": filepath.Join(home, "config"), "XDG_CACHE_HOME": filepath.Join(home, "cache"),
-		"APPDATA": filepath.Join(home, "config"), "LOCALAPPDATA": filepath.Join(home, "cache"), "TMPDIR": filepath.Join(home, "tmp"), "TMP": filepath.Join(home, "tmp"), "TEMP": filepath.Join(home, "tmp"),
-		"CODEX_HOME": filepath.Join(home, ".codex"), "CLAUDE_CONFIG_DIR": filepath.Join(home, ".claude"), "LANG": "en_US.UTF-8",
-		"CAPTURE_API_KEY": "synthetic-fingerprint-capture", "ANTHROPIC_API_KEY": "synthetic-fingerprint-capture", "ANTHROPIC_BASE_URL": base,
-		"DISABLE_TELEMETRY": "1", "DISABLE_ERROR_REPORTING": "1", "DISABLE_AUTOUPDATER": "1", "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "OTEL_SDK_DISABLED": "true",
-	} {
-		env = append(env, k+"="+v)
-	}
-	return env
 }
 
 func captureBody(w http.ResponseWriter, r *http.Request) (map[string]json.RawMessage, error) {

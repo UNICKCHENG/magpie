@@ -193,7 +193,8 @@ type Provider struct {
 	Searches bool `json:"searches,omitempty"`
 
 	// MaskClient is the optional client fingerprint for a custom provider's
-	// selected BaseAPI: codex for Responses, claude-code for Anthropic.
+	// selected BaseAPI: the private Codex CLI for Responses, or Claude Code
+	// for Anthropic inference. Lists and balances keep their HTTP APIs.
 	// Empty keeps the usual request behavior. It travels with providers.json.
 	MaskClient string `json:"maskClient,omitempty"`
 

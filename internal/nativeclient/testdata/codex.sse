@@ -1,0 +1,15 @@
+event: response.created
+data: {"type": "response.created", "response": {"id": "resp_native", "object": "response", "model": "gpt-5.6", "created_at": 1, "status": "in_progress", "output": [], "usage": {"input_tokens": 12, "output_tokens": 2, "total_tokens": 14}}}
+
+event: response.output_item.added
+data: {"type": "response.output_item.added", "output_index": 0, "item": {"id": "msg_native", "type": "message", "role": "assistant", "status": "in_progress", "content": []}}
+
+event: response.output_text.delta
+data: {"type": "response.output_text.delta", "item_id": "msg_native", "output_index": 0, "content_index": 0, "delta": "Native answer"}
+
+event: response.output_item.done
+data: {"type": "response.output_item.done", "output_index": 0, "item": {"id": "msg_native", "type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Native answer", "annotations": []}]}}
+
+event: response.completed
+data: {"type": "response.completed", "response": {"id": "resp_native", "object": "response", "model": "gpt-5.6", "created_at": 1, "status": "completed", "output": [{"id": "msg_native", "type": "message", "role": "assistant", "status": "completed", "content": [{"type": "output_text", "text": "Native answer", "annotations": []}]}], "usage": {"input_tokens": 12, "output_tokens": 2, "total_tokens": 14}}}
+

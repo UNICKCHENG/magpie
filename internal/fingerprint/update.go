@@ -149,5 +149,8 @@ func update(parent context.Context) error {
 	if e := writeState(s); e != nil {
 		return e
 	}
+	if err == nil {
+		PruneNative()
+	}
 	return err
 }

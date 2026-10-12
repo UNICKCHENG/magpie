@@ -59,19 +59,16 @@ func TestRepeatedCaptureClosesItsListener(t *testing.T) {
 	// request means validation fails; that path must still close the server.
 	dir := t.TempDir()
 	exe := filepath.Join(dir, "client")
-	if err := os.WriteFile(exe, []byte("#!/bin/sh\nprintf '%s' \"$ANTHROPIC_BASE_URL\" > \"$HOME/base\"\n"), 0700); err != nil {
+	observed := filepath.Join(dir, "observed-base")
+	quoted := "'" + strings.ReplaceAll(observed, "'", "'\\''") + "'"
+	if err := os.WriteFile(exe, []byte("#!/bin/sh\nprintf '%s' \"$ANTHROPIC_BASE_URL\" > "+quoted+"\n"), 0700); err != nil {
 		t.Fatal(err)
 	}
 	for range 12 {
-		work := t.TempDir()
-		if _, err := capture(context.Background(), Claude, "2.1.296", exe, work); err == nil {
+		if _, err := capture(context.Background(), Claude, "2.1.296", exe); err == nil {
 			t.Fatal("empty capture accepted")
 		}
-		files, err := filepath.Glob(filepath.Join(work, "home-*", "base"))
-		if err != nil || len(files) != 1 {
-			t.Fatal("fake CLI did not finish", err)
-		}
-		b, err := os.ReadFile(files[0])
+		b, err := os.ReadFile(observed)
 		if err != nil {
 			t.Fatal(err)
 		}

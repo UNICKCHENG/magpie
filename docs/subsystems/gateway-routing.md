@@ -272,3 +272,25 @@ go test -tags nogui ./internal/provider -run 'TestGroup|TestCodexCreditsSwitch|T
 
 The gateway's `TestMain` gives the package a home of its own, so these tests
 never read real providers or accounts.
+
+## Custom-provider native fingerprints
+
+`forwardOnce` selects `Provider.DoNative` only when `MaskProtocol` matches the
+outgoing API. Its body transformations and ExtraBody run before that selection;
+manual client identity headers and HTTP signing run only on the HTTP branch.
+The native branch uses the existing RPM admission ticket and a gateway-owned
+bounded CLI pool. `nativeScope` requires explicit caller/client/session
+identity; it never uses the prompt-derived `conversationID` for process reuse.
+Anthropic beta and request-shape compatibility retries apply to both native
+and ordinary providers; their error response must identify a refused feature
+before a retry. Chat input still uses the shared conversion to the provider's
+outgoing API before native dispatch. Anthropic token counting for this branch
+is local. Model lists, balances and
+subscription dispatch stay on their existing paths. See the
+[provider runtime reference](providers-accounts.md#private-native-client-fingerprints)
+for bounds, isolation, update ownership and protocol compatibility limits.
+
+Native CLI networking is outside Go's HTTP transport. Its first-content and
+total duration remain measurable at the gateway, but transport-level sent/
+connection timings are unavailable; they are not synthesized from CLI startup
+or a control-message write.

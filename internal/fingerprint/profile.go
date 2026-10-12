@@ -1,5 +1,5 @@
-// Package fingerprint learns reusable client identity from isolated CLI runs.
-// It never keeps credentials, conversation IDs, tools or user instructions.
+// Package fingerprint manages custom-provider client builds and legacy identity
+// captures. Its saved state contains no credentials or conversation content.
 package fingerprint
 
 import (
@@ -15,18 +15,23 @@ import (
 	"time"
 
 	"github.com/yetone/magpie/internal/filememo"
+	"github.com/yetone/magpie/internal/nativeclient"
 	"github.com/yetone/magpie/internal/settings"
 	"github.com/yetone/magpie/internal/steady"
 )
 
-const Codex = "codex"
-const Claude = "claude-code"
+const Codex = nativeclient.Codex
+const Claude = nativeclient.Claude
 
-// Profile contains only stable identity fields observed in a client request.
+// Profile records the validated build and nonsecret evidence of its local
+// smoke test. Inference never copies this identity onto requests. Previous
+// keeps the last build available for rollback.
 type Profile struct {
 	Version  string            `json:"version"`
 	Headers  map[string]string `json:"headers"`
 	Identity string            `json:"identity,omitempty"`
+	Binary   *Binary           `json:"binary,omitempty"`
+	Previous *Binary           `json:"previous,omitempty"`
 }
 
 type state struct {
@@ -87,6 +92,14 @@ func writeState(s state) error {
 func Current(client string) (Profile, bool) {
 	p, ok := readState().Profiles[client]
 	p.Headers = maps.Clone(p.Headers)
+	if p.Binary != nil {
+		b := *p.Binary
+		p.Binary = &b
+	}
+	if p.Previous != nil {
+		b := *p.Previous
+		p.Previous = &b
+	}
 	return p, ok
 }
 
@@ -102,6 +115,11 @@ func UpdateStatus() Status {
 	}
 	for c, p := range s.Profiles {
 		out.Versions[c] = p.Version
+	}
+	for _, client := range []string{Codex, Claude} {
+		if b := selectedBinary(client, s.Profiles[client]); b != nil {
+			out.Versions[client] = b.Version
+		}
 	}
 	return out
 }
@@ -122,6 +140,16 @@ func validate(client string, p Profile) error {
 	if !versionRE.MatchString(p.Version) {
 		return errors.New("invalid client version")
 	}
+	if p.Binary != nil {
+		if _, err := binaryPath(client, *p.Binary); err != nil || p.Binary.Version != p.Version {
+			return errors.New("invalid native client version")
+		}
+	}
+	if p.Previous != nil {
+		if _, err := binaryPath(client, *p.Previous); err != nil {
+			return err
+		}
+	}
 	allowed := map[string]bool{}
 	for _, k := range allowedHeaders(client) {
 		allowed[k] = true
@@ -137,7 +165,7 @@ func validate(client string, p Profile) error {
 	}
 	switch client {
 	case Codex:
-		if !strings.HasPrefix(h.Get("User-Agent"), "codex") || !strings.Contains(h.Get("User-Agent"), "/"+p.Version+" ") || h.Get("Originator") == "" || p.Identity != "" {
+		if !(strings.HasPrefix(h.Get("User-Agent"), "codex") || strings.HasPrefix(h.Get("User-Agent"), "magpie_native/")) || !strings.Contains(h.Get("User-Agent"), "/"+p.Version+" ") || h.Get("Originator") == "" || p.Identity != "" {
 			return errors.New("Codex identity was not captured")
 		}
 		if v := h.Get("Version"); v != "" && v != p.Version {

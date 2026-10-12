@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/yetone/magpie/internal/nativeclient"
 	"github.com/yetone/magpie/internal/settings"
 	"github.com/yetone/magpie/internal/testenv"
 )
@@ -206,6 +207,15 @@ func TestUnchangedVersionDoesNotDownloadOrRunCLI(t *testing.T) {
 	defer srv.Close()
 	codexReleaseURL = srv.URL
 	old := sample(Codex, "0.162.1")
+	source := filepath.Join(t.TempDir(), "native-client")
+	if err := os.WriteFile(source, []byte("validated native executable"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	var err error
+	old.Binary, err = storeBinary(Codex, old.Version, source)
+	if err != nil {
+		t.Fatal(err)
+	}
 	dir := t.TempDir()
 	for range 24 {
 		p, err := downloadAndCapture(context.Background(), Codex, dir, old)
@@ -247,7 +257,7 @@ func TestCaptureKeepsIdentityOnly(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "SYNTHETIC_PRIVATE_VALUE")
 	t.Setenv("ANTHROPIC_API_KEY", "SYNTHETIC_PRIVATE_VALUE")
 	t.Setenv("CLAUDE_CODE_OAUTH_TOKEN", "SYNTHETIC_PRIVATE_VALUE")
-	if strings.Contains(strings.Join(captureEnv(t.TempDir(), "http://127.0.0.1:1234"), "\n"), "SYNTHETIC_PRIVATE_VALUE") {
+	if strings.Contains(strings.Join(nativeclient.Environment(t.TempDir(), "direct"), "\n"), "SYNTHETIC_PRIVATE_VALUE") {
 		t.Fatal("real credentials inherited")
 	}
 }

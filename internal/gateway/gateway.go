@@ -31,6 +31,7 @@ import (
 	"github.com/yetone/magpie/internal/awake"
 
 	"github.com/yetone/magpie/internal/fingerprint"
+	"github.com/yetone/magpie/internal/nativeclient"
 	"github.com/yetone/magpie/internal/plugin"
 	"github.com/yetone/magpie/internal/provider"
 	"github.com/yetone/magpie/internal/redact"
@@ -329,6 +330,7 @@ type Call struct {
 
 // Server is the gateway.
 type Server struct {
+	native nativeclient.Pool
 	client *http.Client
 	mu     sync.Mutex
 	recent []Call
@@ -473,7 +475,9 @@ func (s *Server) ListenAndServe(ctx context.Context) error {
 	fingerprintCtx, stopFingerprint := context.WithCancel(ctx)
 	fingerprintDone := make(chan struct{})
 	go func() { defer close(fingerprintDone); fingerprint.Keep(fingerprintCtx) }()
-	defer func() { stopFingerprint(); <-fingerprintDone }()
+	nativeDone := make(chan struct{})
+	go func() { defer close(nativeDone); provider.KeepNative(fingerprintCtx) }()
+	defer func() { stopFingerprint(); s.native.Close(); <-fingerprintDone; <-nativeDone }()
 	// and, when settings say to, keeps the computer awake while agents work
 	go awake.Keep(ctx, func() awake.Level {
 		switch set := settings.Load(); {
@@ -1049,6 +1053,7 @@ func (s *Server) countOn(w http.ResponseWriter, r *http.Request, p provider.Prov
 		// with an error every time: one more request its firewall weighs
 		p.Account.Agent == "zcode") ||
 		ok && p.Account != nil && p.Account.Agent == provider.CommandCodePlanID && cmdGoing(r.Context(), p) ||
+		ok && p.MaskProtocol() == provider.Anthropic ||
 		ok && p.IsPlugin() && (slices.Contains(estimatedMoved, p.ID) || slices.Contains(estimatedMoved, p.PluginProvider())) {
 		req, err := parseAnthropic(body)
 		if err != nil {
@@ -3074,6 +3079,11 @@ func markAntigravityRefused(w http.ResponseWriter, p provider.Provider, system, 
 // 403 or 400 it can mend (Provider.Retry) is asked again, a few times at most.
 func (s *Server) forward(ctx context.Context, p provider.Provider, to provider.Protocol, path string, body []byte, in http.Header) (*http.Response, error) {
 	res, err := s.forwardOnce(ctx, p, to, path, body, in)
+	// Native defaults belong to the executable. Do not repeat an identical
+	// native request to repair headers that only an HTTP transport controls.
+	if p.MaskProtocol() == to {
+		return res, err
+	}
 	if err == nil && (res.StatusCode == http.StatusForbidden || res.StatusCode == http.StatusBadRequest) && p.Retries() {
 		// an account that can mend what the refusal names (a Factory org
 		// the server won't take; a model Copilot's Auto picked that the
@@ -3119,15 +3129,6 @@ func (s *Server) forward(ctx context.Context, p provider.Provider, to provider.P
 // forwardOnce is one request to the provider, as forward makes it.
 func (s *Server) forwardOnce(ctx context.Context, p provider.Provider, to provider.Protocol, path string, body []byte, in http.Header) (*http.Response, error) {
 	ctx = s.metered(p.Via(ctx), p, "")
-	// the client a masked provider wears (provider.MaskClient): its body
-	// shaped as it sends one, whatever agent the request came from
-	maskSession := ""
-	var mask fingerprint.Snapshot
-	if p.MaskProtocol() == to {
-		maskSession = conversationID(in, body)
-		mask = provider.ClientFingerprint(p.MaskClient)
-		body = mask.ApplyBody(p.Key, string(to), body)
-	}
 	body = deepseekToolPatterns(p, to, body)
 	body = toolOneOfAsAnyOf(p, to, body)
 	body = kimiToolEnumTypes(p, to, body)
@@ -3162,6 +3163,9 @@ func (s *Server) forwardOnce(ctx context.Context, p provider.Provider, to provid
 		// body is as it goes out when they fill in what it lacks, and
 		// before it is signed
 		body = p.WithExtraBody(body, cmp.Or(sessionOf(in), conversationID(in, body)))
+	}
+	if p.MaskProtocol() == to && !countsTokens(path) {
+		return p.DoNative(nativeclient.WithPool(ctx, &s.native), to, body, nativeScope(ctx, p, in), s.betas(p, betas), payRPM)
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, p.Base(to)+path, bytes.NewReader(body))
 	if err != nil {
@@ -3212,32 +3216,6 @@ func (s *Server) forwardOnce(ctx context.Context, p provider.Provider, to provid
 			}
 		}
 		provider.SawClient(provider.ClientCodex, seen)
-	}
-	if p.MaskProtocol() == to {
-		// a provider that wears a client (provider.MaskClient): the request
-		// already wears it when it came from that client (fromCodex or
-		// fromClaudeCode above, its own headers the best mask); from any
-		// other it goes in the client's own identity
-		if p.MaskClient == provider.ClientCodex && !fromCodex(in) {
-			mask.ApplyHeaders(req.Header)
-			provider.MaskSessionHeaders(provider.ClientCodex, maskSession, req.Header)
-		}
-		if p.MaskClient == provider.ClientClaudeCode && !fromClaudeCode(in) {
-			mask.ApplyHeaders(req.Header)
-			provider.MaskSessionHeaders(provider.ClientClaudeCode, maskSession, req.Header)
-			// the mask's betas are fitted as any others are (betas.go): one
-			// the provider has turned away by name is left out, so the retry
-			// forward makes goes without it instead of the mask putting it
-			// back
-			if bs := s.betas(p, req.Header.Values("anthropic-beta")); len(bs) > 0 {
-				req.Header.Set("anthropic-beta", strings.Join(bs, ","))
-			} else {
-				req.Header.Del("anthropic-beta")
-			}
-			if req.URL.RawQuery == "" {
-				req.URL.RawQuery = "beta=true" // as Claude Code asks it
-			}
-		}
 	}
 	if p.IsOpenCode() {
 		// as OpenCode itself sends it, which Zen's free tier asks for

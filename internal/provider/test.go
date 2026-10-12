@@ -17,7 +17,6 @@ import (
 	"time"
 
 	"github.com/yetone/magpie/internal/catalog"
-	"github.com/yetone/magpie/internal/fingerprint"
 )
 
 // Result is what a probe of one endpoint came back with.
@@ -416,28 +415,29 @@ func AuthHeaders(p Provider, proto Protocol) map[string]string {
 	return map[string]string{"Authorization": "Bearer " + p.Key}
 }
 
-// probeModel prepares a model test in gateway order: client identity, then
-// extra body fields. One snapshot supplies both the body and headers.
+// probeModel follows the same native opt-in as inference. The internal Codex
+// probe asks for a streamed short answer, since its CLI has no token-limit flag.
 func probeModel(ctx context.Context, p Provider, proto Protocol, url, body, model string, wait time.Duration) Result {
-	// Use the same fingerprint as forwarded requests, after the existing
-	// test logic has chosen the model's API. Explicit Test-as keeps its own.
-	var mask *fingerprint.Snapshot
-	if testClient(ctx) == "" && p.MaskProtocol() == proto {
-		snapshot := ClientFingerprint(p.MaskClient)
-		mask = &snapshot
-		body = string(mask.ApplyBody(p.Key, string(proto), []byte(body)))
-		if proto == Anthropic && !strings.Contains(url, "?") {
-			url += "?beta=true"
+	if p.MaskProtocol() == proto {
+		var m map[string]json.RawMessage
+		if json.Unmarshal([]byte(body), &m) == nil {
+			m["stream"] = json.RawMessage("true")
+			if proto == Responses {
+				delete(m, "max_output_tokens")
+			}
+			b, _ := json.Marshal(m)
+			body = string(b)
 		}
+		return probeRequest(ctx, p, proto, url, p.tested(body), model, wait, true)
 	}
-	return probeRequest(ctx, p, proto, url, p.tested(body), model, wait, mask)
+	return probeRequest(ctx, p, proto, url, p.tested(body), model, wait, false)
 }
 
 func probe(ctx context.Context, p Provider, proto Protocol, url string, body []byte, model string, wait time.Duration) Result {
-	return probeRequest(ctx, p, proto, url, body, model, wait, nil)
+	return probeRequest(ctx, p, proto, url, body, model, wait, false)
 }
 
-func probeRequest(ctx context.Context, p Provider, proto Protocol, url string, body []byte, model string, wait time.Duration, mask *fingerprint.Snapshot) Result {
+func probeRequest(ctx context.Context, p Provider, proto Protocol, url string, body []byte, model string, wait time.Duration, native bool) Result {
 	r := Result{Protocol: proto, Model: model}
 	if model == "" {
 		r.Error = "no model to try: expose one, or refresh the model list"
@@ -465,15 +465,16 @@ func probeRequest(ctx context.Context, p Provider, proto Protocol, url string, b
 	}
 	if client := testClient(ctx); client != "" {
 		clientHeaders(client, req.Header)
-	} else if mask != nil {
-		mask.ApplyHeaders(req.Header)
-	}
-	if err := p.Sign(ctx, req, proto, body); err != nil {
-		r.Error = err.Error()
-		return r
 	}
 	start := time.Now()
-	res, err := p.Do(http.DefaultClient, req)
+	var res *http.Response
+	if native {
+		res, err = p.DoNative(ctx, proto, body, "", nil, nil)
+	} else {
+		if err = p.Sign(ctx, req, proto, body); err == nil {
+			res, err = p.Do(http.DefaultClient, req)
+		}
+	}
 	r.Millis = time.Since(start).Milliseconds()
 	if err != nil {
 		r.Error = strings.TrimPrefix(err.Error(), "Post \""+url+"\": ")
